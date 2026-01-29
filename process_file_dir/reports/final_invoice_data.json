@@ -1,0 +1,64 @@
+[
+    {
+        "file_path": "C:\\Users\\JPZ031127\\Desktop\\project\\invoice_inspector\\process_file_dir\\CT&INV&PL CLW26007 DAF.xlsx",
+        "file_name": "CT&INV&PL CLW26007 DAF.xlsx",
+        "invoice_id": "CLW26007",
+        "sheets": {
+            "Invoice": {
+                "sqft": 178819.8,
+                "amount": 184896.51,
+                "pallet_info": 19
+            },
+            "PackingList": {
+                "pcs": 8542,
+                "net_weight": 27796.0,
+                "gross_weight": 29506.0,
+                "cbm": 95.2
+            },
+            "Contract": {
+                "sqft": 0.0,
+                "amount": 0.0
+            }
+        },
+        "sqft": 178819.8,
+        "amount": 184896.51,
+        "pcs": 8542,
+        "net_weight": 27796.0,
+        "gross_weight": 29506.0,
+        "cbm": 95.2,
+        "pallet_info": 19,
+        "verification_details": "",
+        "quantity": 178819.8
+    },
+    {
+        "file_path": "C:\\Users\\JPZ031127\\Desktop\\project\\invoice_inspector\\process_file_dir\\CT&INV&PL JF26001 DAF(1).xlsx",
+        "file_name": "CT&INV&PL JF26001 DAF(1).xlsx",
+        "invoice_id": "JF26001",
+        "sheets": {
+            "Invoice": {
+                "sqft": 209280.6,
+                "amount": 275905.192,
+                "pallet_info": 29
+            },
+            "PackingList": {
+                "pcs": 4607,
+                "net_weight": 18322.0,
+                "gross_weight": 19627.0,
+                "cbm": 62.766
+            },
+            "Contract": {
+                "sqft": 209280.6,
+                "amount": 275905.192
+            }
+        },
+        "sqft": 209280.6,
+        "amount": 275905.192,
+        "pcs": 4607,
+        "net_weight": 18322.0,
+        "gross_weight": 19627.0,
+        "cbm": 62.766,
+        "pallet_info": 29,
+        "verification_details": "",
+        "quantity": 209280.6
+    }
+]
