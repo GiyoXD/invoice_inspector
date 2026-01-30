@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+
+/process_file_dir
+final_invoice_data.json
+MasterList.csv
