@@ -118,6 +118,7 @@ class InvoiceInspectorApp:
         ttk.Button(editor_controls, text="Save Changes", command=self.save_master_list).pack(side="left", padx=5)
         ttk.Button(editor_controls, text="Reload File", command=self.load_master_editor).pack(side="left", padx=5)
         ttk.Button(editor_controls, text="Add New Row", command=self.add_master_row).pack(side="left", padx=5)
+        ttk.Button(editor_controls, text="Delete Row", command=self.delete_master_row).pack(side="left", padx=5)
         
         # Editor Grid
         tree_frame = ttk.Frame(self.editor_frame)
@@ -161,7 +162,9 @@ class InvoiceInspectorApp:
         # Details column is the last one (index 9)
         if len(values) >= 10:
              details_val = values[9]
-             self.details_text.insert(tk.END, str(details_val))
+             # Formatting: Break lines for readability
+             formatted_val = str(details_val).replace('; ', '\n').replace(';', '\n')
+             self.details_text.insert(tk.END, formatted_val)
 
     def ensure_defaults(self):
         """Checks for default paths (MasterList.csv, process_file_dir) and sets them."""
@@ -445,12 +448,32 @@ class InvoiceInspectorApp:
         if self.master_df is None:
             return
             
+        # Robust Index generation
+        if not self.master_df.index.empty:
+            new_row_idx = self.master_df.index.max() + 1
+        else:
+            new_row_idx = 0
+            
         # Add empty row to DF
-        new_row_idx = len(self.master_df)
         self.master_df.loc[new_row_idx] = [None] * len(self.master_df.columns)
         
         # Add to Tree
         self.editor_tree.insert('', 'end', iid=new_row_idx, values=[""]*len(self.master_df.columns))
+
+    def delete_master_row(self):
+        selected_item = self.editor_tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Selection Required", "Please select a row to delete.")
+            return
+
+        idx = int(selected_item[0]) # iid is the index
+        
+        # Remove from DF
+        if idx in self.master_df.index:
+            self.master_df.drop(index=idx, inplace=True)
+            
+        # Remove from Tree
+        self.editor_tree.delete(selected_item)
 
     def save_master_list(self):
         if self.master_df is None:
