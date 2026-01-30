@@ -88,20 +88,22 @@ def identify_column_type(sheet, row_idx, col_idx, mapping_dict):
         
         if 'total' in text and 'value' in text: return 'col_amount'
         if 'amount' in text: return 'col_amount'
+        if 'pallet' in text and 'weight' not in text: return 'col_pallet_count'
              
     return None
 
-def find_packing_list_sheet(wb):
-    """Finds a sheet named like 'packing', 'pl', etc."""
+def find_all_packing_list_sheets(wb):
+    """Finds ALL sheets that look like a packing list."""
+    sheets = []
     for sheet in wb:
         title = sheet.title.lower()
-        if 'pack' in title or 'pl' in title:
-            return sheet
-    return None
+        if 'pack' in title or 'weight' in title or 'detail' in title:
+            sheets.append(sheet)
+    return sheets
 
-def extract_packing_list_data(sheet, mapping_dict) -> dict:
+def extract_packing_list_data(sheet_values, sheet_formulas, mapping_dict) -> dict:
     """
-    Extracts and SUMS data from all 'Total' rows in the Packing List sheet.
+    Extracts data from the SINGLE best 'Total' row in the Packing List sheet.
     Target fields: Pcs, Net Weight, Gross Weight, CBM.
     """
     data = {
@@ -111,56 +113,47 @@ def extract_packing_list_data(sheet, mapping_dict) -> dict:
         'cbm': 0.0
     }
     
-    total_found = False
+    # 1. Find Smart Total Row
+    row_idx = find_smart_total_row(sheet_values, sheet_formulas)
     
-    # Let's scan for Total rows
-    total_rows = []
-    
-    # Optimization: Scan rows generator
-    # Assuming totals are in first 20 columns
-    for row in sheet.iter_rows(max_col=20):
-        is_total = False
-        for cell in row:
-             if cell.value and isinstance(cell.value, str):
-                 if "total" in cell.value.lower():
-                     is_total = True
-                     break
-        if is_total:
-            total_rows.append(row)
-            
-    if not total_rows:
+    if row_idx == -1:
         return {}
         
-    for row in total_rows:
-        # For each total row, detect columns for keys we care about
-        # We assume headers are somewhere above.
-        
-        row_idx = row[0].row
-        
+    # 2. Extract from that single row
+    try:
+        row = sheet_values[row_idx]
         for cell in row:
              if cell.value is None: continue 
              
              # Identify column type
-             c_type = identify_column_type(sheet, row_idx, cell.column, mapping_dict)
+             c_type = identify_column_type(sheet_values, row_idx, cell.column, mapping_dict)
              
              try:
                  val = cell.value
+                 # Helper to get float
+                 num = 0.0
                  if isinstance(val, (int, float)):
                      num = float(val)
-                 else:
-                     continue # Skip non-numeric
-                     
+                 elif isinstance(val, str):
+                     import re
+                     m = re.search(r'(\d+(\.\d+)?)', val.replace(',', '').replace('$', ''))
+                     if m: num = float(m.group(1))
+
+                 if num == 0.0: continue
+
                  if c_type == 'col_qty_pcs':
-                     data['pcs'] += int(num)
+                     data['pcs'] = int(num)
                  elif c_type == 'col_net':
-                     data['net_weight'] += num
+                     data['net_weight'] = num
                  elif c_type == 'col_gross':
-                     data['gross_weight'] += num
+                     data['gross_weight'] = num
                  elif c_type == 'col_cbm':
-                     data['cbm'] += num
+                     data['cbm'] = num
              except:
                  pass
-                 
+    except Exception as e:
+        print(f"Error extracting packing list row: {e}")
+
     # Format and return non-zero
     res = {}
     if data['pcs'] > 0: res['pcs'] = data['pcs']
@@ -188,63 +181,105 @@ def find_contract_sheet(wb):
         
     return None
 
-def extract_contract_data(sheet) -> dict:
-    """Extracts Total Quantity and Amount from Contract sheet."""
-    data = {'contract_sqft': 0.0, 'contract_amount': 0.0}
+BLACKLIST_TERMS = ["buffalo", "cow", "leather"]
+
+def find_smart_total_row(sheet_values, sheet_formulas) -> int:
+    """
+    Identifies the best 'Total' row index by checking:
+    1. 'Total' label exists.
+    2. Does NOT contain BLACKLIST_TERMS.
+    3. Row contains formulas like '=SUM' or arithmetic '+'.
+    """
+    best_row_idx = -1
+    max_score = 0
     
-    # 1. Find Total Row
-    total_row_idx = -1
-    for row in sheet.iter_rows():
-        found_label = False
+    # Iterate rows. We use sheet_values for text checking, sheet_formulas for formula checking.
+    # Assuming both sheets are synced in row count.
+    
+    # Pre-load formulas to avoid random access issues? Iterating is safer.
+    # We'll iterate sheet_formulas mainly, and peek sheet_values for labels?
+    # Or iterate by index.
+    
+    max_row = sheet_values.max_row
+    # optimization: check first 100 rows? or all? Contract sheets are small.
+    # Invoice sheets might be large.
+    
+    # Let's iterate sheet_values to find "Total" candidates first.
+    
+    for row in sheet_values.iter_rows():
+        row_idx = row[0].row
+        
+        # 1. Label Check & Blacklist Check
+        has_total = False
+        has_blacklist = False
+        
         for cell in row:
             if cell.value and isinstance(cell.value, str):
                 v = cell.value.lower()
-                if 'total:' in v or 'total value' in v:
-                     found_label = True
-                     break
-        
-        if found_label:
-            # Verify this is a DATA row, not a HEADER row.
-            # Check Col C (Index 2) and Col E (Index 4) for numeric-likeness.
-            # The header row has "Quantity(SF)" in Col C and "Total value(USD)" in Col E.
-            # We want the row with actual numbers.
-            
-            try:
-                # Safe bounds check
-                if len(row) > 4:
-                    val_c = row[2].value
-                    val_e = row[4].value
-                    
-                    def is_numeric_data(val):
-                        if isinstance(val, (int, float)): return True
-                        if isinstance(val, str):
-                            # Reject if it looks like a header text
-                            v_str = val.lower()
-                            if "quantity" in v_str or "price" in v_str or "value" in v_str or "usd" in v_str:
-                                return False
-                            # Must have digits to be a number candidate
-                            import re
-                            if re.search(r'\d', v_str): 
-                                return True
-                        return False
-
-                    # If either column has numeric data, assume it's the Total Row
-                    if is_numeric_data(val_c) or is_numeric_data(val_e):
-                        total_row_idx = row[0].row
+                # Check Blacklist first
+                for term in BLACKLIST_TERMS:
+                    if term in v:
+                        has_blacklist = True
                         break
-                    else:
-                        # It was likely the header row
-                        pass
-            except Exception:
-                pass
+                if has_blacklist: break
+                
+                # Check Total Label
+                if 'total' in v:
+                    has_total = True
+        
+        if has_blacklist:
+            continue
+            
+        if not has_total:
+            continue
+            
+        # Potentially a candidate. Now check formulas in sheet_formulas at this row_idx.
+        # Check Formula Criteria
+        formula_score = 0
+        try:
+            # Get corresponding row from formula sheet
+            # formula_row = sheet_formulas[row_idx] # Access by index might be slow if large?
+            # It's okay for these file sizes.
+            
+            f_row = sheet_formulas[row_idx]
+            for cell in f_row:
+                if cell.value and isinstance(cell.value, str):
+                    fv = cell.value.upper()
+                    if str(fv).startswith('=SUM'):
+                        formula_score += 2
+                    elif '+' in str(fv) and '=' in str(fv): # Simple arithmetic like =C1+C2
+                         formula_score += 1
+        except Exception:
+            pass
+
+        # Decision Logic
+        # If we have formulas, it's a strong candidate.
+        # If we have NO formulas found yet, but 'Total' text is there, keep as weak candidate?
+        # User requirement: "if n+ has more than 2 col using =sum, it is the row we want"
+        
+        current_score = 1 # Base score for having "Total"
+        current_score += formula_score
+        
+        if current_score > max_score:
+            max_score = current_score
+            best_row_idx = row_idx
+            
+    return best_row_idx
+
+def extract_contract_data(sheet_values, sheet_formulas) -> dict:
+    """Extracts Total Quantity and Amount from Contract sheet using Smart Detection."""
+    data = {'contract_sqft': 0.0, 'contract_amount': 0.0}
+    
+    # 1. Find Smart Total Row
+    total_row_idx = find_smart_total_row(sheet_values, sheet_formulas)
 
     if total_row_idx == -1:
-        print("  Debug: Contract Sheet - No 'Total' row found.")
+        print("  Debug: Contract Sheet - No suitable 'Total' row found.")
         return data
 
-    # 2. Extract Values from that row
+    # 2. Extract Values from that row (using Values sheet)
     try:
-        row = sheet[total_row_idx]
+        row = sheet_values[total_row_idx]
         print(f"  Debug: Contract Total Row ({total_row_idx}): {[c.value for c in row if c.value]}")
         
         def get_float(cell):
@@ -303,30 +338,33 @@ def excel_data_extractor(file_path: Path) -> dict:
         # Top-level proxies for backward compatibility (GUI/Reports)
         'sqft': "N/A", 'amount': "N/A", 'pcs': "N/A", 
         'net_weight': "N/A", 'gross_weight': "N/A", 'cbm': "N/A", 'pallet_info': "N/A",
-        'verification_details': ""
+        'verification_details': "",
+        'sheet_status': {'Invoice': False, 'PackingList': False, 'Contract': False}
     }
     
     try:
         wb = load_workbook(file_path, data_only=True)
+        # Load Formulas WB (Optimization: Could check if we need it first, but safer to just load)
+        wb_formulas = load_workbook(file_path, data_only=False)
     except Exception as e:
         print(f"Error loading workbook: {e}")
         return result
 
     print(f"  Debug: Workbook Sheets: {[s.title for s in wb]}")
+    
+    total_sheet_count = len(wb.sheetnames)
+    matched_sheet_count = 0
 
     # --- 1. Invoice Sheet Extraction ---
     inv_sheet = find_invoice_sheet(wb)
     
     if inv_sheet:
-        data_row_idx = -1
-        for row in inv_sheet.iter_rows():
-            for cell in row:
-                if cell.value and isinstance(cell.value, str):
-                    if total_regex.search(cell.value):
-                        data_row_idx = cell.row
-                        break
-            if data_row_idx != -1:
-                break
+        matched_sheet_count += 1
+        result['sheet_status']['Invoice'] = True
+        # Find corresponding sheet in formulas WB
+        inv_sheet_formulas = wb_formulas[inv_sheet.title]
+        
+        data_row_idx = find_smart_total_row(inv_sheet, inv_sheet_formulas)
                 
         if data_row_idx != -1:
              found_cols = {}
@@ -362,11 +400,33 @@ def excel_data_extractor(file_path: Path) -> dict:
 
     # --- 2. Packing List Extraction ---
     pack_data = {}
-    pack_sheet = find_packing_list_sheet(wb)
-    if pack_sheet:
-        print(f"  Extracting Packing List: {pack_sheet.title}")
-        pack_data = extract_packing_list_data(pack_sheet, mapping_dict)
-        # Populate sheets dict
+    packing_sheets = find_all_packing_list_sheets(wb)
+    result['packing_candidates'] = []
+    
+    if packing_sheets:
+        # Mark all as identified
+        matched_sheet_count += len(packing_sheets)
+        result['sheet_status']['PackingList'] = True
+        
+        print(f"  Found {len(packing_sheets)} Packing List candidates: {[s.title for s in packing_sheets]}")
+        
+        # Extract from ALL candidates
+        for idx, p_sheet in enumerate(packing_sheets):
+            p_formulas = wb_formulas[p_sheet.title]
+            p_data = extract_packing_list_data(p_sheet, p_formulas, mapping_dict)
+            
+            # Store candidate
+            result['packing_candidates'].append({
+                'sheet_name': p_sheet.title,
+                'data': p_data
+            })
+            
+            # Use First one as Default (for now)
+            if idx == 0:
+                pack_data = p_data
+                print(f"  Defaulting to: {p_sheet.title}")
+
+        # Populate sheets dict (Default)
         for k in ['pcs', 'net_weight', 'gross_weight', 'cbm']:
             if k in pack_data:
                 result['sheets']['PackingList'][k] = pack_data[k]
@@ -374,10 +434,22 @@ def excel_data_extractor(file_path: Path) -> dict:
     # --- 3. Contract Sheet Extraction ---
     contract_sheet = find_contract_sheet(wb)
     if contract_sheet:
-        c_data = extract_contract_data(contract_sheet)
+        matched_sheet_count += 1
+        result['sheet_status']['Contract'] = True
+        contract_sheet_formulas = wb_formulas[contract_sheet.title]
+        c_data = extract_contract_data(contract_sheet, contract_sheet_formulas)
         result['sheets']['Contract']['sqft'] = c_data.get('contract_sqft', 0)
         result['sheets']['Contract']['amount'] = c_data.get('contract_amount', 0)
         print(f"  Contract Data Extracted: SQFT={c_data.get('contract_sqft')}, Amt={c_data.get('contract_amount')}")
+        
+    # --- Check for Unidentified Sheets ---
+    if matched_sheet_count < total_sheet_count:
+        msg = f"Warning: Unidentified Sheet(s) Found (Matched {matched_sheet_count} vs Total {total_sheet_count})"
+        print(f"  {msg}")
+        if result['verification_details']:
+            result['verification_details'] += f"; {msg}"
+        else:
+            result['verification_details'] = msg
 
     # --- Formatting & Flattening for Back-Compat/Verification ---
     
@@ -940,46 +1012,92 @@ def verify_against_master(master_path: Path, extracted_data: list[dict]):
             
             # Iterate Scope
             for sheet_name, scoped_keys in VERIFICATION_SCOPE.items():
-                sheet_data = extracted_sheets.get(sheet_name, {})
                 
-                for e_key, m_key in scoped_keys.items():
-                    # 1. Get Master Value
-                    master_col = col_map.get(m_key)
-                    m_val = 0.0
-                    if master_col and master_col in row:
-                        m_val = get_num(row[master_col], "master")
+                # Special Handling for PackingList Candidates (Strict Mode)
+                if sheet_name == 'PackingList' and extracted_item.get('packing_candidates'):
+                    candidates = extracted_item.get('packing_candidates')
                     
-                    # 2. Get Extracted Value from specific Sheet
-                    e_val = get_num(sheet_data.get(e_key, 0), "extracted")
-                    
-                    # 3. Calculate Diff
-                    diff = e_val - m_val
-                    
-                    # 4. Strict Validation (Tolerance 1.0)
-                    if abs(diff) > 1.0:
-                        all_match = False
-                        # Detailed logic: e.g. "Contract SQFT Mismatch..."
-                        # Format: "{Sheet} {Field} Mismatch ({Val} vs Master {Master})"
-                        readable_key = e_key.replace('_info', '').replace('_', ' ').upper()
-                        if readable_key == 'SQFT': readable_key = 'SQFT/QTY'
+                    for idx, cand in enumerate(candidates):
+                        c_name = cand['sheet_name']
+                        c_data = cand['data']
                         
-                        msg = f"{sheet_name} {readable_key} Mismatch ({e_val} vs Master {m_val})"
-                        print(f"  [Fail] {msg} for {m_id}")
-                        
-                        if 'verification_details' in extracted_item:
-                            extracted_item['verification_details'] += f"; {msg}"
-                        else:
-                            extracted_item['verification_details'] = msg
+                        for e_key, m_key in scoped_keys.items():
+                            # 1. Master Value
+                            master_col = col_map.get(m_key)
+                            m_val = 0.0
+                            if master_col and master_col in row:
+                                m_val = get_num(row[master_col], "master")
+                            
+                            # 2. Extracted Value
+                            e_val = get_num(c_data.get(e_key, 0), "extracted")
+                            
+                            # 3. Diff
+                            diff = e_val - m_val
+                            
+                            # 4. Check
+                            if abs(diff) > 1.0:
+                                all_match = False
+                                readable_key = e_key.replace('_', ' ').upper()
+                                msg = f"'{c_name}' {readable_key} Mismatch ({e_val} vs Master {m_val})"
+                                print(f"  [Fail] {msg} for {m_id}")
+                                
+                                if 'verification_details' in extracted_item:
+                                    if msg not in extracted_item['verification_details']:
+                                        extracted_item['verification_details'] += f"; {msg}"
+                                else:
+                                    extracted_item['verification_details'] = msg
+                                
+                                # 5. Populate DIFFs (Only for Primary/First Candidate)
+                                # We assume the first found candidate maps to the Master List columns
+                                if idx == 0:
+                                     if DIFF_SOURCE_MAP.get(m_key) == sheet_name:
+                                         for d_col, d_key in diff_cols.items():
+                                             if d_key == m_key:
+                                                 diffs[d_col] = diff
+                                                 break
 
-                    # 5. Populate DIFF columns (Legacy/CSV output)
-                    # Only if this sheet is the primary source for this key
-                    if DIFF_SOURCE_MAP.get(m_key) == sheet_name:
-                         # Find which DIFF column maps to this m_key
-                         # diff_cols map: { 'DIFF_SQFT': 'sqft', ... }
-                         for d_col, d_key in diff_cols.items():
-                             if d_key == m_key:
-                                 diffs[d_col] = diff
-                                 break
+                else:
+                    # Standard Single Verification (Invoice, Contract, or no candidates)
+                    # Skip if missing
+                    if not extracted_item.get('sheet_status', {}).get(sheet_name, False):
+                        continue
+
+                    sheet_data = extracted_sheets.get(sheet_name, {})
+                    
+                    for e_key, m_key in scoped_keys.items():
+                        # 1. Master Value
+                        master_col = col_map.get(m_key)
+                        m_val = 0.0
+                        if master_col and master_col in row:
+                            m_val = get_num(row[master_col], "master")
+                        
+                        # 2. Extracted Value
+                        e_val = get_num(sheet_data.get(e_key, 0), "extracted")
+                        
+                        # 3. Diff
+                        diff = e_val - m_val
+                        
+                        # 4. Check
+                        if abs(diff) > 1.0:
+                            all_match = False
+                            readable_key = e_key.replace('_info', '').replace('_', ' ').upper()
+                            if readable_key == 'SQFT': readable_key = 'SQFT/QTY'
+                            
+                            msg = f"{sheet_name} {readable_key} Mismatch ({e_val} vs Master {m_val})"
+                            print(f"  [Fail] {msg} for {m_id}")
+                            
+                            if 'verification_details' in extracted_item:
+                                if msg not in extracted_item['verification_details']:
+                                    extracted_item['verification_details'] += f"; {msg}"
+                            else:
+                                extracted_item['verification_details'] = msg
+
+                        # 5. Populate DIFF columns
+                        if DIFF_SOURCE_MAP.get(m_key) == sheet_name:
+                             for d_col, d_key in diff_cols.items():
+                                 if d_key == m_key:
+                                     diffs[d_col] = diff
+                                     break
 
             verify_state = all_match
             
