@@ -88,7 +88,6 @@ def identify_column_type(sheet, row_idx, col_idx, mapping_dict):
         
         if 'total' in text and 'value' in text: return 'col_amount'
         if 'amount' in text: return 'col_amount'
-        if 'pallet' in text and 'weight' not in text: return 'col_pallet_count'
              
     return None
 
@@ -107,10 +106,11 @@ def extract_packing_list_data(sheet_values, sheet_formulas, mapping_dict) -> dic
     Target fields: Pcs, Net Weight, Gross Weight, CBM.
     """
     data = {
-        'pcs': 0,
-        'net_weight': 0.0,
-        'gross_weight': 0.0,
-        'cbm': 0.0
+        'col_qty_pcs': 0,
+        'col_net': 0.0,
+        'col_gross': 0.0,
+        'col_cbm': 0.0,
+        'col_pallet_count': 0
     }
     
     # 1. Find Smart Total Row
@@ -130,25 +130,41 @@ def extract_packing_list_data(sheet_values, sheet_formulas, mapping_dict) -> dic
              
              try:
                  val = cell.value
-                 # Helper to get float
+                 if val is None: continue
+                 
+                 # Basic float extraction
                  num = 0.0
-                 if isinstance(val, (int, float)):
-                     num = float(val)
-                 elif isinstance(val, str):
-                     import re
-                     m = re.search(r'(\d+(\.\d+)?)', val.replace(',', '').replace('$', ''))
-                     if m: num = float(m.group(1))
+                 val_str = str(val).strip()
+                 
+                 # Strategy 1: Regex for numbers
+                 import re
+                 m = re.search(r'(\d+(\.\d+)?)', val_str.replace(',', '').replace('$', ''))
+                 if m: num = float(m.group(1))
 
+                 # Strategy 2: Explicit Text Search for Pallets (Override/Supplement)
+                 # If cell text matches "X Pallets" pattern, trust it even without column header
+                 if 'pallet' in val_str.lower():
+                     m_pal = re.search(r'(\d+)\s*[-_]?\s*pallet', val_str, re.IGNORECASE) or re.search(r'pallet\w*\s*[:\-]?\s*(\d+)', val_str, re.IGNORECASE) or re.search(r'(\d+)', val_str) # Fallback to any number in cell if "pallet" is present
+                     if m_pal:
+                         p_val = int(float(m_pal.group(1)))
+                         if p_val > 0:
+                             data['col_pallet_count'] = p_val
+                             # If we found it via text, we don't need to treat it as a generic number
+                             # But let's continue in case it's also mapped
+                 
                  if num == 0.0: continue
 
                  if c_type == 'col_qty_pcs':
-                     data['pcs'] = int(num)
+                     data['col_qty_pcs'] = int(num)
                  elif c_type == 'col_net':
-                     data['net_weight'] = num
+                     data['col_net'] = num
                  elif c_type == 'col_gross':
-                     data['gross_weight'] = num
+                     data['col_gross'] = num
                  elif c_type == 'col_cbm':
-                     data['cbm'] = num
+                     data['col_cbm'] = num
+                 elif c_type == 'col_pallet_count':
+                     # If header says Pallet, trust the number
+                     data['col_pallet_count'] = int(num)
              except:
                  pass
     except Exception as e:
@@ -156,10 +172,11 @@ def extract_packing_list_data(sheet_values, sheet_formulas, mapping_dict) -> dic
 
     # Format and return non-zero
     res = {}
-    if data['pcs'] > 0: res['pcs'] = data['pcs']
-    if data['net_weight'] > 0: res['net_weight'] = round(data['net_weight'], 3)
-    if data['gross_weight'] > 0: res['gross_weight'] = round(data['gross_weight'], 3)
-    if data['cbm'] > 0: res['cbm'] = round(data['cbm'], 4)
+    if data['col_qty_pcs'] > 0: res['col_qty_pcs'] = data['col_qty_pcs']
+    if data['col_net'] > 0: res['col_net'] = round(data['col_net'], 3)
+    if data['col_gross'] > 0: res['col_gross'] = round(data['col_gross'], 3)
+    if data['col_cbm'] > 0: res['col_cbm'] = round(data['col_cbm'], 4)
+    if data['col_pallet_count'] > 0: res['col_pallet_count'] = data['col_pallet_count']
     
     return res
 
@@ -268,7 +285,7 @@ def find_smart_total_row(sheet_values, sheet_formulas) -> int:
 
 def extract_contract_data(sheet_values, sheet_formulas) -> dict:
     """Extracts Total Quantity and Amount from Contract sheet using Smart Detection."""
-    data = {'contract_sqft': 0.0, 'contract_amount': 0.0}
+    data = {'col_qty_sf': 0.0, 'col_amount': 0.0}
     
     # 1. Find Smart Total Row
     total_row_idx = find_smart_total_row(sheet_values, sheet_formulas)
@@ -307,8 +324,8 @@ def extract_contract_data(sheet_values, sheet_formulas) -> dict:
         print(f"  Debug: Reading Col C (Idx 2): {row[2].value} -> {c_sqft}")
         print(f"  Debug: Reading Col E (Idx 4): {row[4].value} -> {c_amt}")
         
-        data['contract_sqft'] = c_sqft
-        data['contract_amount'] = c_amt
+        data['col_qty_sf'] = c_sqft
+        data['col_amount'] = c_amt
         
     except Exception as e:
         print(f"Error reading contract row: {e}")
@@ -322,22 +339,19 @@ def excel_data_extractor(file_path: Path) -> dict:
     """
     mapping_dict = load_mapping_config()
     
-    # regex for finding "Total" row
-    total_regex = re.compile(r'(?i)total\s*:|total\s+of\s*:|total\s+value\s*\(?usd\)?')
-    
     # Initialize Output Structure
     result = {
         'file_path': str(file_path),
         'file_name': file_path.name,
         'invoice_id': 'Unknown',
         'sheets': {
-            'Invoice': {'sqft': "N/A", 'amount': "N/A", 'pallet_info': "N/A"},
-            'PackingList': {'pcs': "N/A", 'net_weight': "N/A", 'gross_weight': "N/A", 'cbm': "N/A"},
-            'Contract': {'sqft': 0.0, 'amount': 0.0}
+            'Invoice': {'col_qty_sf': "N/A", 'col_amount': "N/A", 'col_pallet_count': "N/A"},
+            'PackingList': {'col_qty_pcs': "N/A", 'col_net': "N/A", 'col_gross': "N/A", 'col_cbm': "N/A"},
+            'Contract': {'col_qty_sf': 0.0, 'col_amount': 0.0}
         },
         # Top-level proxies for backward compatibility (GUI/Reports)
-        'sqft': "N/A", 'amount': "N/A", 'pcs': "N/A", 
-        'net_weight': "N/A", 'gross_weight': "N/A", 'cbm': "N/A", 'pallet_info': "N/A",
+        'col_qty_sf': "N/A", 'col_amount': "N/A", 'col_qty_pcs': "N/A", 
+        'col_net': "N/A", 'col_gross': "N/A", 'col_cbm': "N/A", 'col_pallet_count': "N/A",
         'verification_details': "",
         'sheet_status': {'Invoice': False, 'PackingList': False, 'Contract': False}
     }
@@ -381,8 +395,8 @@ def excel_data_extractor(file_path: Path) -> dict:
                  return None
                  
              # Extract to Invoice Sheet dict
-             result['sheets']['Invoice']['amount'] = get_v('col_amount') or "N/A"
-             result['sheets']['Invoice']['sqft'] = get_v('col_qty_sf') or "N/A"
+             result['sheets']['Invoice']['col_amount'] = get_v('col_amount') or "N/A"
+             result['sheets']['Invoice']['col_qty_sf'] = get_v('col_qty_sf') or "N/A"
              
              pal_val = get_v('col_pallet_count')
              pal_regex_val = None
@@ -396,7 +410,7 @@ def excel_data_extractor(file_path: Path) -> dict:
                        m = re.search(r'(\d+(\.\d+)?)', final_p)
                        if m: final_p = float(m.group(1))
                        if isinstance(final_p, float) and str(final_p).endswith('.0'): final_p = int(final_p)
-                  result['sheets']['Invoice']['pallet_info'] = final_p
+                  result['sheets']['Invoice']['col_pallet_count'] = final_p
 
     # --- 2. Packing List Extraction ---
     pack_data = {}
@@ -427,7 +441,7 @@ def excel_data_extractor(file_path: Path) -> dict:
                 print(f"  Defaulting to: {p_sheet.title}")
 
         # Populate sheets dict (Default)
-        for k in ['pcs', 'net_weight', 'gross_weight', 'cbm']:
+        for k in ['col_qty_pcs', 'col_net', 'col_gross', 'col_cbm', 'col_pallet_count']:
             if k in pack_data:
                 result['sheets']['PackingList'][k] = pack_data[k]
 
@@ -438,9 +452,9 @@ def excel_data_extractor(file_path: Path) -> dict:
         result['sheet_status']['Contract'] = True
         contract_sheet_formulas = wb_formulas[contract_sheet.title]
         c_data = extract_contract_data(contract_sheet, contract_sheet_formulas)
-        result['sheets']['Contract']['sqft'] = c_data.get('contract_sqft', 0)
-        result['sheets']['Contract']['amount'] = c_data.get('contract_amount', 0)
-        print(f"  Contract Data Extracted: SQFT={c_data.get('contract_sqft')}, Amt={c_data.get('contract_amount')}")
+        result['sheets']['Contract']['col_qty_sf'] = c_data.get('col_qty_sf', 0)
+        result['sheets']['Contract']['col_amount'] = c_data.get('col_amount', 0)
+        print(f"  Contract Data Extracted: SQFT={c_data.get('col_qty_sf')}, Amt={c_data.get('col_amount')}")
         
     # --- Check for Unidentified Sheets ---
     if matched_sheet_count < total_sheet_count:
@@ -465,20 +479,27 @@ def excel_data_extractor(file_path: Path) -> dict:
 
     # 2. Flatten/Merge logic for Top-Level (Prefer Invoice > Packing List)
     # Invoice Data
-    result['amount'] = result['sheets']['Invoice']['amount']
-    result['sqft'] = result['sheets']['Invoice']['sqft']
-    result['pallet_info'] = result['sheets']['Invoice']['pallet_info']
-    result['quantity'] = result['sqft'] # Alias
-
+    result['col_amount'] = result['sheets']['Invoice']['col_amount']
+    result['col_qty_sf'] = result['sheets']['Invoice']['col_qty_sf']
+    result['col_pallet_count'] = result['sheets']['Invoice']['col_pallet_count']
+    
     # Packing List Data (Supplement Invoice if missing, or use Packing List specific)
     # Usually PCS/Weight/CBM come from Packing List.
     # But if checking generic keys, we map them here.
     
     pl = result['sheets']['PackingList']
-    result['pcs'] = pl['pcs']
-    result['net_weight'] = pl['net_weight']
-    result['gross_weight'] = pl['gross_weight']
-    result['cbm'] = pl['cbm']
+    result['col_qty_pcs'] = pl.get('col_qty_pcs', "N/A")
+    result['col_net'] = pl.get('col_net', "N/A")
+    result['col_gross'] = pl.get('col_gross', "N/A")
+    result['col_cbm'] = pl.get('col_cbm', "N/A")
+
+    # Pallet Fallback (If Invoice missed it)
+    if result['col_pallet_count'] == "N/A" or result['col_pallet_count'] == 0:
+        if pl.get('col_pallet_count'):
+             result['col_pallet_count'] = pl['col_pallet_count']
+             # Backfill Invoice sheet for verification purposes
+             result['sheets']['Invoice']['col_pallet_count'] = pl['col_pallet_count']
+             print(f"  [Info] Using Pallet Count from Packing List: {pl['col_pallet_count']}")
     
 
 
@@ -997,9 +1018,9 @@ def verify_against_master(master_path: Path, extracted_data: list[dict]):
             
             # Map Sheet -> { Extracted Key : Master Internal Key }
             VERIFICATION_SCOPE = {
-                'Invoice': { 'sqft': 'sqft', 'amount': 'amount', 'pallet_info': 'pallets' },
-                'Contract': { 'sqft': 'sqft', 'amount': 'amount' },
-                'PackingList': { 'pcs': 'pcs', 'net_weight': 'net_weight', 'gross_weight': 'gross_weight', 'cbm': 'cbm' }
+                'Invoice': { 'col_qty_sf': 'sqft', 'col_amount': 'amount', 'col_pallet_count': 'pallets' },
+                'Contract': { 'col_qty_sf': 'sqft', 'col_amount': 'amount' },
+                'PackingList': { 'col_qty_pcs': 'pcs', 'col_net': 'net_weight', 'col_gross': 'gross_weight', 'col_cbm': 'cbm', 'col_pallet_count': 'pallets' }
             }
             
             # For filling DIFF columns in Master List, we prioritize standard sources

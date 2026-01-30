@@ -18,6 +18,13 @@
     "header_text_mappings": {
         "comment": "Map header texts from quantity data to column IDs in template",
         "mappings": {
+            "PALLET NO.#": "col_pallet_count",
+            "Pallet No": "col_pallet_count",
+            "Pallet NO.": "col_pallet_count",
+            "Pallet": "col_pallet_count",
+            "Net Weight (Kgs)": "col_net",
+            "Volume (CBM)": "col_cbm",
+            "Gross Weight (Kgs)": "col_gross",
             "Mark & N\u00ba": "col_static",
             "Mark & N\u00b0": "col_static",
             "MARK & NOTE": "col_static",
@@ -236,6 +243,10 @@
             "dog": "col_dog",
             "\u7ea7\u522b": "col_level",
             "TEST PO": "col_po",
+            "Pallets": "col_pallet_count",
+            "Pallet": "col_pallet_count",
+            "PALLETS": "col_pallet_count",
+            "PALLET NO.#": "col_pallet_count",
             "test sqft": "col_qty_sf"
         }
     },
