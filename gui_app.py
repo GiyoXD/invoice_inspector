@@ -313,13 +313,13 @@ class InvoiceInspectorApp:
             values = (
                 inv_id,
                 status,
-                item.get('pcs', ''),
-                item.get('sqft', ''),
-                item.get('amount', ''),
-                item.get('pallet_info', ''),
-                item.get('net_weight', ''),
-                item.get('gross_weight', ''),
-                item.get('cbm', ''),
+                item.get('col_qty_pcs', ''),
+                item.get('col_qty_sf', ''),
+                item.get('col_amount', ''),
+                item.get('col_pallet_count', ''),
+                item.get('col_net', ''),
+                item.get('col_gross', ''),
+                item.get('col_cbm', ''),
                 details  # New Column
             )
             self.tree.insert('', 'end', values=values, tags=tags)
