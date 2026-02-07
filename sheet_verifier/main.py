@@ -11,6 +11,7 @@ from sheet_verifier.master_loader import load_master_list
 from sheet_verifier.verifier import InvoiceVerifier
 from sheet_verifier.reporter import generate_report
 from sheet_verifier.extractor import SheetExtractor # Used implicitly by verifier, but good to check import
+from core.regex_utils import regex_extract
 
 def parse_filename_for_id(filename: str, master_ids: list) -> str:
     # 1. Check exact match
@@ -19,10 +20,11 @@ def parse_filename_for_id(filename: str, master_ids: list) -> str:
             return mid
     
     # 2. Simple regex fallback (optional)
-    import re
-    match = re.search(r'([A-Z]+[-_]?\d+)', filename)
-    if match:
-        return match.group(1)
+    # 2. Simple regex fallback (optional) - using core utility
+    from core.regex_utils import regex_extract
+    result = regex_extract(filename, r'([A-Z]+[-_]?\d+)', group=1)
+    if result:
+        return result
         
     return None
 

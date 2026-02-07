@@ -1,3 +1,0 @@
-Filename,Status,Details
-INV-100_Valid.xlsx,PASS,All sheets matched Master List.
-INV-101_Invalid.xlsx,FAIL,"[Packing list] Quantity Mismatch: Found 15.0, Expected 20.0"

@@ -73,7 +73,7 @@ class InvoiceVerifier:
                 # Tolerance check
                 try:
                     diff = abs(float(expected) - float(actual))
-                    if diff > 1.0: # Allow 1.0 diff for rounding
+                    if diff > 0.01: # Strict tolerance (0.01)
                         result['status'] = 'FAIL'
                         result['details'].append(
                             f"[{real_name}] {field.capitalize()} Mismatch: Found {actual}, Expected {expected}"

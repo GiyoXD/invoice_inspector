@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Optional
+from core.regex_utils import regex_extract_number
 
 def load_master_list(file_path: Path) -> Dict[str, Dict[str, float]]:
     """
@@ -66,11 +67,8 @@ def load_master_list(file_path: Path) -> Dict[str, Dict[str, float]]:
                 if isinstance(val, (int, float)): return float(val)
                 # Simple string cleanup
                 clean_str = str(val).replace(',', '').replace('$', '').strip()
-                import re
-                match = re.search(r'(\d+(\.\d+)?)', clean_str)
-                if match:
-                    return float(match.group(1))
-                return 0.0
+                result = regex_extract_number(clean_str, default=0.0)
+                return result
             except:
                 return 0.0
 
