@@ -6,6 +6,11 @@ from typing import List, Dict, Set, Optional
 from core.config import load_mapping_config
 from core.models import ExtractedInvoice, VerificationStatus
 from core.regex_utils import regex_extract_number, regex_extract
+from core.exceptions import (
+    create_file_not_found_error,
+    create_invalid_shipping_list_error,
+    create_unknown_error,
+)
 
 # Config
 BLACKLIST_TERMS = ["buffalo", "cow", "leather"]
@@ -331,7 +336,25 @@ def extract_contract_data(sheet_values, sheet_formulas, mapping_dict) -> dict:
     return data
 
 def excel_data_extractor(file_path: Path) -> ExtractedInvoice:
-    """Main extraction logic for a single file."""
+    """
+    Main extraction logic for a single file.
+    
+    Args:
+        file_path: Path to the Excel file
+        
+    Returns:
+        ExtractedInvoice object with extracted data
+        
+    Raises:
+        FileError: If file cannot be found or loaded
+        ParsingError: If unexpected error occurs during processing
+    """
+    file_path = Path(file_path)
+    
+    # Validate file exists
+    if not file_path.exists():
+        raise create_file_not_found_error(file_path.name)
+    
     mapping_dict = load_mapping_config()
     
     # Initialize Model
@@ -340,10 +363,20 @@ def excel_data_extractor(file_path: Path) -> ExtractedInvoice:
     try:
         wb = load_workbook(file_path, data_only=True)
         wb_formulas = load_workbook(file_path, data_only=False)
+    except FileNotFoundError:
+        raise create_file_not_found_error(file_path.name)
+    except PermissionError as e:
+        raise create_unknown_error(
+            file_name=file_path.name,
+            original_exception=e,
+            operation="Loading workbook - file may be locked by another program"
+        )
     except Exception as e:
-        print(f"Error loading workbook {file_path.name}: {e}")
-        result.status = VerificationStatus.UNKNOWN
-        return result
+        raise create_unknown_error(
+            file_name=file_path.name,
+            original_exception=e,
+            operation="Loading workbook"
+        )
 
     total_sheet_count = len(wb.sheetnames)
     matched_sheet_count = 0
@@ -427,6 +460,26 @@ def excel_data_extractor(file_path: Path) -> ExtractedInvoice:
         result.sheets['Contract']['target_inspect_col'] = list(ct_inspectable)
         result.sheets['Contract']['detection_info'] = ct_detection
         result.sheets['Contract']['sheet_title'] = contract_sheet.title
+
+    # VALIDATION: Check if any sheet had successful header detection
+    # If we found sheets but couldn't detect headers, it's an invalid shipping list
+    header_detection_failed = False
+    failed_sheets = []
+    
+    for sheet_type in ['Invoice', 'PackingList', 'Contract']:
+        sheet_data = result.sheets.get(sheet_type, {})
+        detection_info = sheet_data.get('detection_info', {})
+        if detection_info.get('status') == 'failed':
+            header_detection_failed = True
+            sheet_title = sheet_data.get('sheet_title', sheet_type)
+            failed_sheets.append(sheet_title)
+    
+    # Only raise if we found sheets but ALL of them failed header detection
+    if matched_sheet_count > 0 and header_detection_failed and len(failed_sheets) == matched_sheet_count:
+        raise create_invalid_shipping_list_error(
+            file_name=file_path.name,
+            reason=f"Header detection failed on all sheets: {failed_sheets}"
+        )
 
     # Formatting & Flattening
     def format_val(v):
