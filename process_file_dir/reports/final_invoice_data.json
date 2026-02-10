@@ -1,15 +1,15 @@
 [
     {
-        "file_path": "C:\\Users\\JPZ031127\\Desktop\\project\\invoice_inspector\\process_file_dir\\CT&INV&PL CLW26007 DAF(3).xlsx",
-        "file_name": "CT&INV&PL CLW26007 DAF(3).xlsx",
-        "invoice_id": "CLW26007",
-        "col_amount": 112627.41,
-        "col_qty_sf": 131879.21,
-        "col_pallet_count": 1,
-        "col_qty_pcs": 4657,
-        "col_net": 14815.5,
-        "col_gross": 15760.5,
-        "col_cbm": 52.28,
+        "file_path": "C:\\Users\\JPZ031127\\Desktop\\project\\invoice_inspector\\process_file_dir\\CT&INV&PL JLFHLZN26002 FCA(2).xlsx",
+        "file_name": "CT&INV&PL JLFHLZN26002 FCA(2).xlsx",
+        "invoice_id": "JLFHLZN26002",
+        "col_amount": 18190.55,
+        "col_qty_sf": 15060.9,
+        "col_pallet_count": 4,
+        "col_qty_pcs": 296,
+        "col_net": 3362.75,
+        "col_gross": 1350.9,
+        "col_cbm": 16.43,
         "verification_details": "",
         "status": "Extracted",
         "sheets": {
@@ -19,7 +19,7 @@
                     "col_qty_sf"
                 ],
                 "detection_info": {
-                    "header_row": 18,
+                    "header_row": 20,
                     "detected_cols": [
                         "col_amount",
                         "col_qty_sf"
@@ -27,56 +27,177 @@
                     "status": "ok"
                 },
                 "sheet_title": "Invoice",
-                "col_amount": 112627.41,
-                "col_qty_sf": 131879.21,
-                "col_pallet_count": 1
+                "col_amount": 18190.55,
+                "col_qty_sf": 15060.9,
+                "col_pallet_count": 4
             },
             "PackingList": {
-                "col_qty_pcs": 4657,
-                "col_net": 14815.5,
-                "col_gross": 15760.5,
-                "col_cbm": 52.28,
-                "col_qty_sf": 462738298.2,
+                "col_qty_pcs": 296,
+                "col_net": 3362.75,
+                "col_gross": 1350.9,
+                "col_cbm": 16.43,
+                "col_pallet_count": 3,
+                "col_qty_sf": 15080.9,
                 "target_inspect_col": [
-                    "col_net",
                     "col_cbm",
-                    "col_pallet_count",
-                    "col_gross",
+                    "col_qty_sf",
+                    "col_net",
                     "col_qty_pcs",
-                    "col_qty_sf"
+                    "col_gross"
                 ],
                 "detection_info": {
-                    "header_row": 18,
+                    "header_row": 20,
                     "detected_cols": [
-                        "col_net",
                         "col_cbm",
-                        "col_pallet_count",
-                        "col_gross",
+                        "col_qty_sf",
+                        "col_net",
                         "col_qty_pcs",
-                        "col_qty_sf"
+                        "col_gross"
                     ],
                     "status": "ok"
                 },
                 "sheet_title": "Packing list"
             },
-            "Contract": {}
+            "Contract": {
+                "col_qty_sf": 15069.9,
+                "col_amount": 18189.51,
+                "target_inspect_col": [
+                    "col_amount",
+                    "col_qty_sf"
+                ],
+                "detection_info": {
+                    "header_row": 16,
+                    "detected_cols": [
+                        "col_amount",
+                        "col_qty_sf"
+                    ],
+                    "status": "ok"
+                },
+                "sheet_title": "Contract"
+            }
         },
         "packing_candidates": [
             {
                 "sheet_name": "Packing list",
                 "data": {
-                    "col_qty_pcs": 4657,
-                    "col_net": 14815.5,
-                    "col_gross": 15760.5,
-                    "col_cbm": 52.28,
-                    "col_qty_sf": 462738298.2
+                    "col_qty_pcs": 296,
+                    "col_net": 3362.75,
+                    "col_gross": 1350.9,
+                    "col_cbm": 16.43,
+                    "col_pallet_count": 3,
+                    "col_qty_sf": 15080.9
                 }
             }
         ],
         "sheet_status": {
             "Invoice": true,
             "PackingList": true,
-            "Contract": false
+            "Contract": true
+        },
+        "sources": {
+            "col_amount": "Invoice",
+            "col_qty_sf": "Invoice",
+            "col_pallet_count": "Invoice",
+            "col_qty_pcs": "Packing list",
+            "col_net": "Packing list",
+            "col_gross": "Packing list",
+            "col_cbm": "Packing list"
+        }
+    },
+    {
+        "file_path": "C:\\Users\\JPZ031127\\Desktop\\project\\invoice_inspector\\process_file_dir\\CT&INV&PL JLFHLZN26002 FCA-1.xlsx",
+        "file_name": "CT&INV&PL JLFHLZN26002 FCA-1.xlsx",
+        "invoice_id": "JLFHLZN26002",
+        "col_amount": 21315.63,
+        "col_qty_sf": 18059.9,
+        "col_pallet_count": 3,
+        "col_qty_pcs": 341,
+        "col_net": 1478.0,
+        "col_gross": 1613.0,
+        "col_cbm": 5.4,
+        "verification_details": "",
+        "status": "Extracted",
+        "sheets": {
+            "Invoice": {
+                "target_inspect_col": [
+                    "col_amount",
+                    "col_qty_sf"
+                ],
+                "detection_info": {
+                    "header_row": 20,
+                    "detected_cols": [
+                        "col_amount",
+                        "col_qty_sf"
+                    ],
+                    "status": "ok"
+                },
+                "sheet_title": "Invoice",
+                "col_amount": 21315.63,
+                "col_qty_sf": 18059.9,
+                "col_pallet_count": 3
+            },
+            "PackingList": {
+                "col_qty_pcs": 341,
+                "col_net": 1478.0,
+                "col_gross": 1613.0,
+                "col_cbm": 5.4,
+                "col_pallet_count": 3,
+                "col_qty_sf": 18059.9,
+                "target_inspect_col": [
+                    "col_cbm",
+                    "col_qty_sf",
+                    "col_net",
+                    "col_qty_pcs",
+                    "col_gross"
+                ],
+                "detection_info": {
+                    "header_row": 20,
+                    "detected_cols": [
+                        "col_cbm",
+                        "col_qty_sf",
+                        "col_net",
+                        "col_qty_pcs",
+                        "col_gross"
+                    ],
+                    "status": "ok"
+                },
+                "sheet_title": "Packing list"
+            },
+            "Contract": {
+                "col_qty_sf": 18059.9,
+                "col_amount": 21315.63,
+                "target_inspect_col": [
+                    "col_amount",
+                    "col_qty_sf"
+                ],
+                "detection_info": {
+                    "header_row": 16,
+                    "detected_cols": [
+                        "col_amount",
+                        "col_qty_sf"
+                    ],
+                    "status": "ok"
+                },
+                "sheet_title": "Contract"
+            }
+        },
+        "packing_candidates": [
+            {
+                "sheet_name": "Packing list",
+                "data": {
+                    "col_qty_pcs": 341,
+                    "col_net": 1478.0,
+                    "col_gross": 1613.0,
+                    "col_cbm": 5.4,
+                    "col_pallet_count": 3,
+                    "col_qty_sf": 18059.9
+                }
+            }
+        ],
+        "sheet_status": {
+            "Invoice": true,
+            "PackingList": true,
+            "Contract": true
         },
         "sources": {
             "col_amount": "Invoice",

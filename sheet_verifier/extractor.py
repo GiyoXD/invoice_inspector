@@ -5,6 +5,7 @@ import openpyxl
 from openpyxl.worksheet.worksheet import Worksheet
 from typing import Dict, Any, Optional, Set
 from core.regex_utils import regex_extract_number, regex_extract
+from core.exceptions import DataExtractionError, ErrorCode, ParsingError
 
 # Inspectable column types (verification-critical numeric fields)
 INSPECTABLE_COLS = {
@@ -30,15 +31,12 @@ class SheetExtractor:
         Also populates target_inspect_col with detected inspectable columns.
         """
         data = {
-            'amount': None,
-            'quantity': None,
-            'pallets': None,
-            'invoice_id': None,
             'row_found': -1,
             'header_row': -1,
             'target_inspect_col': set(),  # Track detected inspectable columns
             'extraction_status': 'ok',  # 'ok', 'partial', 'failed'
-            'extraction_errors': []  # List of error messages
+            'extraction_errors': [],  # List of error messages
+            'values': {} # key: col_id -> val: cleaned_value
         }
 
         # 1. First Pass: Scan rows and collect header matches per row
@@ -56,12 +54,13 @@ class SheetExtractor:
                     data_row_idx = cell.row
                 
                 # Check 2: Invoice ID (Header)
-                if not data['invoice_id'] and self.patterns['invoice_id'].search(val_str):
+                if not data.get('invoice_id') and self.patterns['invoice_id'].search(val_str):
                     found_id = self._extract_id_value(sheet, cell)
                     if found_id:
                         data['invoice_id'] = found_id
                 
                 # Check 3: Collect header matches per row
+                # We use lower() to match against normalized keys in header_mappings
                 if val_str.lower() in self.header_mappings:
                     col_id = self.header_mappings[val_str.lower()]
                     if cell.row not in row_header_matches:
@@ -133,48 +132,37 @@ class SheetExtractor:
             if is_formula or is_number:
                 formula_cells.append(cell)
 
-        # 3. Disambiguate Amount vs Quantity
-        # We look up the column headers to decide
+        # 3. Extract Values for ALL detected columns
+        # We iterate over the best header matches to map col_idx to col_id
+        # STRICT: Only extract columns we care about for verification (numeric)
+        col_id_map = {c_idx: c_id for c_idx, c_id in best_matches if c_id in INSPECTABLE_COLS}
         
-        candidates = {} # col_idx -> 'amount' | 'quantity' | None
+        # Also auto-add pallet counts if found via text patterns (handled above in extraction but need to ensure value)
+        # Re-scan the row to pull values for these columns
         
-        for cell in formula_cells:
-             header_type = self._find_header_type(sheet, cell.row, cell.column)
-             candidates[cell.column] = header_type
+        for cell in row_cells:
+            if cell.column in col_id_map:
+                col_id = col_id_map[cell.column]
+                val = cell.value
+                try:
+                    clean_val = self._clean_number(val, context_col=col_id)
+                    data['values'][col_id] = clean_val
+                except ParsingError as e:
+                    # Capture exact error
+                     data['extraction_status'] = 'failed'
+                     data['extraction_errors'].append(f"Value Error in {col_id}: {e.message}")
+                     # Ensure we don't just omit it, maybe store as Error object or safely fail?
+                     # For strict mode, we want this to propagate or be recorded. 
+                     # The verifier will check if key exists. If we don't add it, it's missing.
+                     # But we want to distinguish "Missing" vs "Invalid".
+                     data['values'][col_id] = None # Mark as found but invalid? Or raise?
+                     # Let's re-raise to be safely caught by caller? 
+                     # Actually, better to store as None and let verifier see "None" -> Missing/Invalid?
+                     pass
 
-        # Heuristic assignment
-        qty_col = -1
-        amt_col = -1
-        
-        # Pass 1: explicit headers
-        for col, h_type in candidates.items():
-            if h_type == 'quantity':
-                qty_col = col
-            elif h_type == 'amount':
-                amt_col = col
-                
-        # Pass 2: Inference based on sheet type if still missing
-        if qty_col == -1 and amt_col == -1 and len(formula_cells) >= 1:
-            # If we have 2 numbers, usually larger is Amount, smaller is Qty? Unsafe.
-            # If Packing List -> Primary is Quantity.
-            if sheet_type == 'packing_list':
-                # First numeric col is likely Qty ??
-                qty_col = formula_cells[0].column
-        
-        # Fetch Values (using data_only assumption or re-reading logic if needed)
-        # Note: Openpyxl object passes here might not be data_only=True. 
-        # The caller should ideally pass a data_only workbook or we can't evaluate formulas.
-        # We will assume the passed sheet has values (data_only=True was used on load).
-        
-        if qty_col != -1:
-            data['quantity'] = sheet.cell(row=data_row_idx, column=qty_col).value
-            
-        if amt_col != -1:
-            data['amount'] = sheet.cell(row=data_row_idx, column=amt_col).value
-
-        # Clean values
-        data['quantity'] = self._clean_number(data['quantity'])
-        data['amount'] = self._clean_number(data['amount'])
+        # Handle Pallets special case (if extracted via text pattern but not header)
+        if 'pallets' in data: # from text match
+             data['values']['col_pallet_count'] = data['pallets']
 
         return data
 
@@ -183,13 +171,32 @@ class SheetExtractor:
         result = regex_extract_number(text, default=None)
         return result
 
-    def _clean_number(self, val: Any) -> float:
-        if val is None: return 0.0
+    def _clean_number(self, val: Any, context_col: str = '') -> Optional[float]:
+        """
+        STRICT cleaning.
+        - None -> None
+        - Float/Int -> Float
+        - String -> Attempt parse, else RAISE error.
+        """
+        if val is None: return None
         if isinstance(val, (int, float)): return float(val)
+        
+        s_val = str(val).strip()
+        if not s_val: return None
+        if s_val == '-' or s_val == '.': return 0.0 # Common accounting specific
+        
         try:
-            return float(val)
-        except:
-            return 0.0
+            # Remove currency/commas
+            clean = s_val.replace(',', '').replace('$', '').replace('USD', '').strip()
+            return float(clean)
+        except ValueError:
+            # STRICT FAILURE
+            raise DataExtractionError(
+                error_code=ErrorCode.VALUE_PARSE_ERROR,
+                message=f"Invalid number format: '{s_val}'",
+                file_name="", # to be filled
+                context={"column": context_col, "value": s_val}
+            )
 
     def _find_header_type(self, sheet, row_idx, col_idx) -> Optional[str]:
         # Search upwards
@@ -265,12 +272,12 @@ class SheetExtractor:
             # Merge source 1: header_text_mappings
             if 'header_text_mappings' in config:
                 for k, v in config['header_text_mappings'].get('mappings', {}).items():
-                    mappings[k.strip()] = v
+                    mappings[k.strip().lower()] = v
             
             # Merge source 2: shipping_list_header_map
             if 'shipping_list_header_map' in config:
                 for k, v in config['shipping_list_header_map'].get('mappings', {}).items():
-                    mappings[k.strip()] = v
+                    mappings[k.strip().lower()] = v
             
             return mappings
         except Exception as e:

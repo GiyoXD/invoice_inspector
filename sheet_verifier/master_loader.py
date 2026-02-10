@@ -38,7 +38,7 @@ def load_master_list(file_path: Path) -> Dict[str, Dict[str, float]]:
             col_map['id'] = c
         elif ('amount' in cl or 'total' in cl or 'usd' in cl) and 'quantity' not in cl:
             col_map['amount'] = c
-        elif 'quantity' in cl or 'qty' in cl or 'pcs' in cl:
+        elif 'quantity' in cl or 'qty' in cl:
             col_map['quantity'] = c
         elif 'pallet' in cl:
             col_map['pallets'] = c
@@ -47,6 +47,18 @@ def load_master_list(file_path: Path) -> Dict[str, Dict[str, float]]:
         print(f"Error: Could not identify 'Invoice ID' column in {file_path.name}")
         print(f"Available columns: {list(df.columns)}")
         return {}
+    
+    # Map additional columns
+    for c in df.columns:
+        cl = str(c).lower().strip()
+        if 'pcs' in cl or 'pieces' in cl:
+            col_map['col_qty_pcs'] = c
+        elif 'net' in cl and 'weight' in cl:
+            col_map['col_net'] = c
+        elif 'gross' in cl and 'weight' in cl:
+            col_map['col_gross'] = c
+        elif 'cbm' in cl:
+            col_map['col_cbm'] = c
 
     master_data = {}
     
@@ -73,9 +85,13 @@ def load_master_list(file_path: Path) -> Dict[str, Dict[str, float]]:
                 return 0.0
 
         master_data[inv_id] = {
-            'amount': get_val('amount'),
-            'quantity': get_val('quantity'),
-            'pallets': get_val('pallets')
+            'col_amount': get_val('amount'),
+            'col_qty_sf': get_val('quantity'),
+            'col_pallet_count': get_val('pallets'),
+            'col_qty_pcs': get_val('col_qty_pcs'),
+            'col_net': get_val('col_net'),
+            'col_gross': get_val('col_gross'),
+            'col_cbm': get_val('col_cbm')
         }
 
     print(f"Loaded {len(master_data)} records from Master List.")

@@ -164,6 +164,7 @@ class MasterDataService:
             # Get sheets data for per-sheet verification
             sheets_data = item.get('sheets', {})
             sheet_names = ['Invoice', 'PackingList', 'Contract']
+            all_partition_details = []
             
             for key in checks:
                 master_col = self.col_map.get(key)
@@ -208,6 +209,20 @@ class MasterDataService:
                                 failures_by_sheet[sheet_source] = []
                             failures_by_sheet[sheet_source].append(msg)
                 
+                # Report Partition Details (New Feature)
+                partition_entries = []
+                for s_name in sheet_names:
+                    s_vals = sheets_data.get(s_name, {})
+                    if key in s_vals:
+                         val = get_num(s_vals[key])
+                         if val is not None:
+                             partition_entries.append(f"{s_name}={val}")
+                
+                if partition_entries:
+                    partition_str = f"{key}: {', '.join(partition_entries)}"
+                    # Append later to detection_summary
+                    all_partition_details.append(partition_str)
+
                 # Calculate diff using first sheet's value for master DF update
                 # (Per-sheet check already validates, this is just for DIFF_* column display)
                 extracted_value = get_num(item.get(key))
@@ -225,41 +240,82 @@ class MasterDataService:
 
                         diffs[d_col] = diff
             
-            # Build detection summary header
-            detection_summary = []
+            # --- NEW REPORT BUILDER (Sheet-Centric) ---
+            report_lines = []
             source_file = item.get('file_name', 'Unknown')
-            detection_summary.append(f"Source: {source_file}")
-            detection_summary.append("")
+            # report_lines.append(f"Source: {source_file}") # UI has file name, maybe redundant? keep for copy-paste.
             
-            for sheet_name in sheet_names:
+            # 1. Iterate Sheets
+            for i, sheet_name in enumerate(sheet_names, 1):
                 sheet_data = sheets_data.get(sheet_name, {})
+                
+                # Header: "1. INVOICE (Row 20)"
+                header_info = ""
                 detection = sheet_data.get('detection_info', {})
-                sheet_title = sheet_data.get('sheet_title', sheet_name)
+                if detection and detection.get('status') == 'ok':
+                    header_info = f"(Row {detection.get('header_row')})"
+                elif detection:
+                    header_info = f"(WARNING: {detection.get('warning')})"
+                elif not sheet_data:
+                    header_info = "(Not Found)"
+                    
+                report_lines.append(f"\n{i}. {sheet_name.upper()} {header_info}")
                 
-                if detection:
-                    if detection.get('status') == 'ok':
-                        cols = detection.get('detected_cols', [])
-                        row = detection.get('header_row', -1)
-                        col_names = [c.replace('col_', '') for c in cols]
-                        detection_summary.append(f"[{sheet_title}] Row {row}: {', '.join(col_names) or 'none'}")
-                    else:
-                        warning = detection.get('warning', 'Header not found')
-                        detection_summary.append(f"[{sheet_title}] WARNING: {warning}")
-                elif sheet_data:
-                    detection_summary.append(f"[{sheet_title}] No detection info")
-            
-            # Construct compact details with source in brackets
-            if failures_by_sheet:
-                compact_msgs = []
-                for sheet, msgs in failures_by_sheet.items():
-                    for m in msgs:
-                        compact_msgs.append(f"[{sheet}] {m}")
+                # Table Header
+                # Use fixed width formatting
+                # Field (10) | Current (10) | Master (10) | Variance (10)
+                report_lines.append(f"{'Field':<10} {'Current':<10} {'Master':<10} {'Variance':<10}")
                 
-                detection_summary.append("")
-                detection_summary.append("--- Failures ---")
-                detection_summary.extend(compact_msgs)
+                # Table Rows
+                any_rows = False
+                for key in checks:
+                    # Check if this sheet has this key AND it has a value
+                    # STRICT: We only report if the sheet actually extracted something for this column
+                    val = get_num(sheet_data.get(key))
+                    if val is None: continue
+                    
+                    any_rows = True
+                    
+                    # Get Master Val
+                    master_col = self.col_map.get(key)
+                    m_val = get_num(master_row.get(master_col)) if master_col else None
+                    
+                    # Calc Diff & formatting
+                    diff_str = "N/A"
+                    if m_val is not None:
+                        diff = val - m_val
+                        diff_str = f"{diff:+.2f}"
+                        if diff == 0: diff_str = "-"
+                    
+                    m_str = str(m_val) if m_val is not None else "-"
+                    v_str = str(val)
+                    
+                    # Name formatting: col_qty_sf -> Qty SF
+                    name = key.replace('col_', '').replace('_', ' ').title()
+                    name = name.replace('Qty Sf', 'Qty SF').replace('Qty Pcs', 'Qty PCS').replace('Cbm', 'CBM')
+                    # Shorten for table
+                    name = name.replace('Weight', 'Wgt').replace('Pallet Count', 'Pallets')
+                    
+                    report_lines.append(f"{name:<10} {v_str:<10} {m_str:<10} {diff_str:<10}")
+
+                if not any_rows:
+                    report_lines.append("  (No inspectable data detected)")
+
+            # 2. Logic Checks
+            report_lines.append("")
+            # Net vs Gross (Packing List)
+            pl_data = sheets_data.get('PackingList', {})
+            # We need to be careful to extract them specifically from PL, 
+            # extracted_value in item is aggregated (likely from PL but not guaranteed if we had multi-source)
+            # Safe to take from item or PL sheet. PL sheet is explicit.
+            net = get_num(pl_data.get('col_net'))
+            gross = get_num(pl_data.get('col_gross'))
+
+            if net is not None and gross is not None:
+                if net > gross:
+                    report_lines.append(f"[!] Critical Logic Error: Net Weight ({net}) > Gross Weight ({gross})")
             
-            final_msg = "\n".join(detection_summary)
+            final_msg = "\n".join(report_lines)
             
             curr_details = item.get('verification_details', '')
             if curr_details:
